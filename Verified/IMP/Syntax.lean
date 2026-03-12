@@ -1,8 +1,8 @@
-namespace Imp
+namespace IMP
 
 inductive Expr where
   | num (n : Int)
-  | bool (b: Bool)
+  | bool (b : Bool)
   | var (x : String)
   | add (e1 e2 : Expr)
   | mul (e1 e2 : Expr)
@@ -19,6 +19,10 @@ inductive Value where
   | num (n : Int)
   | bool (b : Bool)
 
-abbrev Env := String -> Value
+abbrev Env := String -> Option Value
 
-end Imp
+-- helper: update the environment
+def Env.update (env : Env) (x : String) (v : Value) : Env :=
+  fun y => if y == x then some v else env y
+
+end IMP

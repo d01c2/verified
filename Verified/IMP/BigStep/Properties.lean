@@ -1,7 +1,7 @@
-import Verified.Imp.Syntax
-import Verified.Imp.Semantics
+import Verified.IMP.Syntax
+import Verified.IMP.BigStep
 
-namespace Imp
+namespace IMP
 
 -- Equivalence of Statements
 
@@ -24,14 +24,15 @@ theorem while_unfold :
       cases hs with
       | skip => exact Exec.while_false he
 
--- Determinism of Imp
+-- Determinism of BigStep IMP
 
 theorem Eval.deterministic (h1 : Eval env e v1) (h2 : Eval env e v2) :
     v1 = v2 := by
   induction h1 generalizing v2 with
   | num => cases h2; rfl
   | bool => cases h2; rfl
-  | var => cases h2; rfl
+  | var h1 => cases h2 with
+    | var h2 => rw [h1] at h2; injection h2
   | add he1 he2 ih1 ih2 =>
     cases h2 with
     | add he1' he2' =>
@@ -92,4 +93,4 @@ theorem Exec.deterministic (h1 : Exec env s env') (h2 : Exec env s env'') :
       cases this
     | while_false => rfl
 
-end Imp
+end IMP
