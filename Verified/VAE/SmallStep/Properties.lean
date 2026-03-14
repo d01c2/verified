@@ -1,125 +1,163 @@
+import Std
 import Verified.VAE.Syntax
 import Verified.VAE.SmallStep
 
 namespace VAE
 
 -- Soundness of SmallStep VAE
--- Every well-formed configuration evaluates to an integer
+-- Every well-formed configuration evaluates to a value in finite steps.
 
 -- helper: collect free variables in an expression
-def Expr.fvs : Expr -> List String
-  | num _ => []
-  | add e1 e2 => e1.fvs ++ e2.fvs
-  | mul e1 e2 => e1.fvs ++ e2.fvs
-  | val x e1 e2 => e1.fvs ++ (e2.fvs.filter (· != x))
-  | id x => [x]
+def Expr.fvs : Expr -> Std.HashSet String
+  | num _ => {}
+  | add e1 e2 => e1.fvs ∪ e2.fvs
+  | mul e1 e2 => e1.fvs ∪ e2.fvs
+  | val x e1 e2 => e1.fvs ∪ (e2.fvs.erase x)
+  | id x => {x}
 
--- Well-Formed Expressions
-def WF (env : Env) (e : Expr) : Prop := ∀ x ∈ e.fvs, (env x).isSome
+-- Well-Formed Configuration: fvs(e) ⊆ dom(σ)
+def WF (config : Env × Expr) : Prop :=
+  ∀ x ∈ config.snd.fvs, x ∈ config.fst
 
 -- helper: check if an expression is a value
 inductive Expr.isValue : Expr -> Prop where
   | num : Expr.isValue (.num n)
 
+-- helper: WF Decomposition Theorems
+-- fvs(e1) ⊆ fvs(e1 + e2) ⊆ dom(σ) -> fvs(e1) ⊆ dom(σ)
+theorem WF.of_add_left (h : WF (env, .add e1 e2)) : WF (env, e1) :=
+  fun x hx => h x (Std.HashSet.mem_union_iff.mpr (Or.inl hx))
+-- fvs(e2) ⊆ fvs(e1 + e2) ⊆ dom(σ) -> fvs(e2) ⊆ dom(σ)
+theorem WF.of_add_right (h : WF (env, .add e1 e2)) : WF (env, e2) :=
+  fun x hx => h x (Std.HashSet.mem_union_iff.mpr (Or.inr hx))
+-- fvs(e1) ⊆ fvs(e1 * e2) ⊆ dom(σ) -> fvs(e1) ⊆ dom(σ)
+theorem WF.of_mul_left (h : WF (env, .mul e1 e2)) : WF (env, e1) :=
+  fun x hx => h x (Std.HashSet.mem_union_iff.mpr (Or.inl hx))
+-- fvs(e2) ⊆ fvs(e1 * e2) ⊆ dom(σ) -> fvs(e2) ⊆ dom(σ)
+theorem WF.of_mul_right (h : WF (env, .mul e1 e2)) : WF (env, e2) :=
+  fun x hx => h x (Std.HashSet.mem_union_iff.mpr (Or.inr hx))
+-- fvs(e1) ⊆ fvs({x := e1; e2}) ⊆ dom(σ) -> fvs(e1) ⊆ dom(σ)
+theorem WF.of_val_init (h : WF (env, .val x e1 e2)) : WF (env, e1) :=
+  fun y hy => h y (Std.HashSet.mem_union_iff.mpr (Or.inl hy))
+-- (fvs(e2) \ {x}) ⊆ fvs({x := e1; e2}) ⊆ dom(σ) -> (fvs(e2) \ {x}) ⊆ dom(σ)
+theorem WF.of_val_filter (h : WF (env, .val x e1 e2)) :
+    ∀ y, y ∈ e2.fvs.erase x -> y ∈ env :=
+  fun y hy => h y (Std.HashSet.mem_union_iff.mpr (Or.inr hy))
+-- (fvs(e2) \ {x}) ⊆ dom(σ) -> fvs(e2) ⊆ dom(σ[x -> n])
+theorem WF.of_val_body (h : WF (env, .val x e1 e2)) (n : Int) :
+    WF (env.insert x n, e2) :=
+  fun y hy => by
+    by_cases heq : x == y
+    · exact Std.HashMap.mem_insert.mpr (Or.inl heq)
+    · exact Std.HashMap.mem_insert.mpr (Or.inr
+        (WF.of_val_filter h y (Std.HashSet.mem_erase.mpr ⟨Bool.eq_false_iff.mpr heq, hy⟩)))
+
+-- helper: WF Composition Theorem
+-- fvs(n) = ∅ ⊆ dom(σ)
+theorem WF.num : WF (env, .num n) :=
+  fun _ h => absurd h (by simp [Expr.fvs])
+-- fvs(e1) ⊆ dom(σ) /\ fvs(e2) ⊆ dom(σ) -> fvs(e1 + e2) ⊆ dom(σ)
+theorem WF.add (h1 : WF (env, e1)) (h2 : WF (env, e2)) : WF (env, .add e1 e2) :=
+  fun x hx => (Std.HashSet.mem_union_iff.mp hx).elim (h1 x) (h2 x)
+-- fvs(e1) ⊆ dom(σ) /\ fvs(e2) ⊆ dom(σ) -> fvs(e1 * e2) ⊆ dom(σ)
+theorem WF.mul (h1 : WF (env, e1)) (h2 : WF (env, e2)) : WF (env, .mul e1 e2) :=
+  fun x hx => (Std.HashSet.mem_union_iff.mp hx).elim (h1 x) (h2 x)
+-- fvs(e1) ⊆ dom(σ) /\ (fvs(e2) \ {x}) ⊆ dom(σ) -> fvs({x := e1; e2}) ⊆ dom(σ)
+theorem WF.mkVal (h1 : WF (env, e1))
+    (h2 : ∀ y, y ∈ e2.fvs.erase x -> y ∈ env) : WF (env, .val x e1 e2) :=
+  fun y hy => (Std.HashSet.mem_union_iff.mp hy).elim (h1 y) (h2 y)
+
+-- helper: WF Monotonicity Theorem
+-- dom(σ) ⊆ dom(σ') -> WF(σ, e) -> WF(σ', e)
+theorem WF.mono (hwf : WF (env, e)) (hext : ∀ x, x ∈ env -> x ∈ env') :
+    WF (env', e) :=
+  fun x hx => hext x (hwf x hx)
+
 -- Progress
-theorem Reduce.progress (env : Env) (e : Expr) (hwf : WF env e) :
-    e.isValue ∨ ∃ env' e', Reduce (env, e) (env', e')
+theorem Step.progress (hwf : WF (env, e)) :
+    e.isValue ∨ ∃ env' e', Step (env, e) (env', e')
   := by
   induction e with
-  | num n => exact Or.inl .num
+  | num n => exact Or.inl .num -- e is a value
   | id x =>
     right
-    have hx := hwf x (by simp [Expr.fvs])
-    cases h : env x with
-    | some n => exact ⟨_, _, Reduce.id h⟩
-    | none => simp [h] at hx
+    -- As e is WF, x ∈ dom(σ)
+    have hx : x ∈ env := by apply hwf; simp [Expr.fvs]
+    -- σ(x) = n for some n
+    let n := env.get x hx
+    -- e steps to n
+    exact ⟨_, .num n, Step.id hx⟩
   | add e1 e2 ih1 ih2 =>
-    have hwf1 : WF env e1 := fun x hx => hwf x (List.mem_append_left _ hx)
-    have hwf2 : WF env e2 := fun x hx => hwf x (List.mem_append_right _ hx)
-    right
-    cases ih1 hwf1 with
-    | inl h1 => -- e1 is value
-      cases ih2 hwf2 with
-      | inl h2 => -- both e1 and e2 are values
-        cases h1 with
-        | num => cases h2 with
-          | num => exact ⟨_, _, Reduce.add_val⟩
-      | inr h2 => -- e2 can step
-        obtain ⟨env', e2', h2⟩ := h2
-        cases h1 with
-        | num => exact ⟨_, _, Reduce.add_right h2⟩
-    | inr h1 => -- e1 can step
-      obtain ⟨env', e1', h1⟩ := h1
-      exact ⟨_, _, Reduce.add_left h1⟩
+      right
+      match ih1 hwf.of_add_left, ih2 hwf.of_add_right with
+      -- e1 steps
+      | Or.inr ⟨env', e1', h⟩, _ => exact ⟨_, _, Step.add_left h⟩
+      -- e1 is a value, e2 steps
+      | Or.inl .num, Or.inr ⟨env', e2', h⟩ => exact ⟨_, _, Step.add_right h⟩
+      -- e1 and e2 both are values
+      | Or.inl .num, Or.inl .num => exact ⟨_, _, Step.add_val⟩
   | mul e1 e2 ih1 ih2 =>
-    have hwf1 : WF env e1 := fun x hx => hwf x (List.mem_append_left _ hx)
-    have hwf2 : WF env e2 := fun x hx => hwf x (List.mem_append_right _ hx)
     right
-    cases ih1 hwf1 with
-    | inl h1 => -- e1 is value
-      cases ih2 hwf2 with
-      | inl h2 => -- both e1 and e2 are values
-        cases h1 with
-        | num => cases h2 with
-          | num => exact ⟨_, _, Reduce.mul_val⟩
-      | inr h2 => -- e2 can step
-        obtain ⟨env', e2', h2⟩ := h2
-        cases h1 with
-        | num => exact ⟨_, _, Reduce.mul_right h2⟩
-    | inr h1 => -- e1 can step
-      obtain ⟨env', e1', h1⟩ := h1
-      exact ⟨_, _, Reduce.mul_left h1⟩
-  | val x e1 e2 ih1 ih2 =>
-    have hwf1 : WF env e1 := fun y hy => hwf y (List.mem_append_left _ hy)
+    match ih1 hwf.of_mul_left, ih2 hwf.of_mul_right with
+    -- e1 steps
+    | Or.inr ⟨env', e1', h⟩, _ => exact ⟨_, _, Step.mul_left h⟩
+    -- e1 is a value, e2 steps
+    | Or.inl .num, Or.inr ⟨env', e2', h⟩ => exact ⟨_, _, Step.mul_right h⟩
+    -- e1 and e2 both are values
+    | Or.inl .num, Or.inl .num => exact ⟨_, _, Step.mul_val⟩
+  | val x e1 e2 ih1 _ =>
     right
-    cases ih1 hwf1 with
-    | inl h1 => -- e1 is value
-      cases h1 with
-      | num => exact ⟨_, _, Reduce.val_val⟩
-    | inr h1 => -- e1 can step
-      obtain ⟨env', e1', h1⟩ := h1
-      exact ⟨_, _, Reduce.val_reduce h1⟩
+    match ih1 hwf.of_val_init with
+    -- e1 steps
+    | Or.inr ⟨env', e1', h⟩ => exact ⟨_, _, Step.val_step h⟩
+    -- e1 is a value
+    | Or.inl .num => exact ⟨_, _, Step.val_bind⟩
 
--- helper: reduction only extends the environment (never removes bindings)
-theorem Reduce.env_extends (h : Reduce c c') :
-    ∀ y, (c.1 y).isSome → (c'.1 y).isSome := by
+-- small-step evaluation rules only add new bindings to environments
+theorem Step.env_extends (h : Step config config') :
+    ∀ x, x ∈ config.fst -> x ∈ config'.fst
+  := by
   induction h with
-  | add_left _ ih | add_right _ ih | mul_left _ ih
-  | mul_right _ ih | val_reduce _ ih => exact ih
-  | add_val | mul_val | id _ => exact fun _ h => h
-  | val_val =>
-    intro y hy; simp only [Env.update]; split <;> simp_all
+  | add_left _ ih => intro x hx; exact ih x hx
+  | add_right _ ih => intro x hx; exact ih x hx
+  | add_val => intro x hx; exact hx
+  | mul_left _ ih => intro x hx; exact ih x hx
+  | mul_right _ ih => intro x hx; exact ih x hx
+  | mul_val => intro x hx; exact hx
+  | id _ => intro x hx; exact hx
+  | val_step _ ih => intro x hx; exact ih x hx
+  | val_bind => intro x hx; exact Std.HashMap.mem_insert.mpr (Or.inr hx)
 
 -- Preservation
-theorem Reduce.preservation (hwf : WF c.1 c.2)
-    (h : Reduce c c') : WF c'.1 c'.2 := by
+theorem Step.preservation (hwf : WF config)
+    (h : Step config config') : WF config'
+  := by
+  revert hwf
   induction h with
-  | add_val | mul_val | id _ => intro y hy; simp [Expr.fvs] at hy
-  | add_right _ ih | mul_right _ ih => exact ih hwf
+  | add_val | mul_val | id _ =>
+    intro hwf; exact WF.num
+  | @val_bind σ x n e2 =>
+    intro hwf; exact WF.of_val_body hwf n
   | add_left hsub ih =>
-    intro y hy
-    cases List.mem_append.mp hy with
-    | inl h => exact ih (fun z hz => hwf z (List.mem_append_left _ hz)) y h
-    | inr h => exact env_extends hsub y (hwf y (List.mem_append_right _ h))
+    intro hwf
+    exact WF.add (ih (WF.of_add_left hwf))
+      (WF.mono (WF.of_add_right hwf) hsub.env_extends)
+  | add_right _ ih =>
+    intro hwf
+    exact WF.add WF.num (ih (WF.of_add_right hwf))
   | mul_left hsub ih =>
-    intro y hy
-    cases List.mem_append.mp hy with
-    | inl h => exact ih (fun z hz => hwf z (List.mem_append_left _ hz)) y h
-    | inr h => exact env_extends hsub y (hwf y (List.mem_append_right _ h))
-  | val_reduce hsub ih =>
-    intro y hy
-    cases List.mem_append.mp hy with
-    | inl h => exact ih (fun z hz => hwf z (List.mem_append_left _ hz)) y h
-    | inr h => exact env_extends hsub y (hwf y (List.mem_append_right _ h))
-  | @val_val env x n e2 =>
-    intro y hy
-    by_cases hyx : y = x
-    · subst hyx; simp [Env.update]
-    · simp only [Env.update]
-      split <;> simp_all [beq_iff_eq]
-      exact hwf y (List.mem_filter.mpr ⟨hy, by simp_all [bne]⟩)
+    intro hwf
+    exact WF.mul (ih (WF.of_mul_left hwf))
+      (WF.mono (WF.of_mul_right hwf) hsub.env_extends)
+  | mul_right _ ih =>
+    intro hwf
+    exact WF.mul WF.num (ih (WF.of_mul_right hwf))
+  | val_step hsub ih =>
+    intro hwf
+    exact WF.mkVal (ih (WF.of_val_init hwf))
+      (fun y hy => hsub.env_extends y (WF.of_val_filter hwf y hy))
 
--- helper: expression size (for termination arguments)
+-- helper: get the size of an expression
 def Expr.size : Expr -> Nat
   | num _ => 0
   | add e1 e2 => 1 + e1.size + e2.size
@@ -127,58 +165,46 @@ def Expr.size : Expr -> Nat
   | val _ e1 e2 => 1 + e1.size + e2.size
   | id _ => 1
 
--- helper: each reduction step strictly decreases expression size
-theorem Reduce.size_decreasing (h : Reduce c c') : c'.2.size < c.2.size
+-- each step strictly decreases expression size
+theorem Step.size_decreasing (h : Step config config') :
+    config'.snd.size < config.snd.size
   := by
   induction h with
-  | add_left _ ih | mul_left _ ih | val_reduce _ ih => simp [Expr.size]; omega
+  | add_left _ ih | mul_left _ ih | val_step _ ih => simp [Expr.size]; omega
   | add_right _ ih | mul_right _ ih => simp [Expr.size]; omega
-  | add_val | mul_val | id _ | val_val => simp [Expr.size]
+  | add_val | mul_val | id _ | val_bind => simp [Expr.size]
 
 -- Termination
-theorem Reduce.termination (env : Env) (e : Expr) (hwf : WF env e) :
-    ∃ k env' n, ReduceK k (env, e) (env', .num n)
-  := by
-  suffices h : ∀ s env e, e.size ≤ s -> WF env e ->
-      ∃ k env' n, ReduceK k (env, e) (env', .num n) from
-    h e.size env e (Nat.le_refl _) hwf
-  intro s
-  induction s with
-  | zero =>
-    intro env e hs hwf
-    cases e with
-    | num n => exact ⟨0, env, n, ReduceK.refl⟩
-    | id x => simp [Expr.size] at hs
-    | add e1 e2 => simp [Expr.size] at hs
-    | mul e1 e2 => simp [Expr.size] at hs
-    | val x e1 e2 => simp [Expr.size] at hs
-  | succ s ih =>
-    intro env e hs hwf
-    cases Reduce.progress env e hwf with
-    | inl hv =>
-      cases hv with
-      | num => exact ⟨0, env, _, ReduceK.refl⟩
-    | inr hstep =>
-      obtain ⟨env', e', hstep⟩ := hstep
-      have hwf' := preservation hwf hstep
-      have hsd : e'.size < e.size := size_decreasing hstep
-      obtain ⟨k, env'', n, hk⟩ := ih env' e' (by omega) hwf'
-      exact ⟨k + 1, env'', n, ReduceK.step hstep hk⟩
+theorem Step.termination : WellFounded (fun c' c => Step c c') :=
+  Subrelation.wf
+    (fun h => size_decreasing h)
+    (InvImage.wf (fun (c : Env × Expr) => c.snd.size) Nat.lt_wfRel.wf)
 
 -- Soundness = Progress + Preservation + Termination
-theorem Reduce.soundness (env : Env) (e : Expr) (hwf : WF env e) :
-    ∃ env' n, ReduceStar (env, e) (env', .num n)
-  := by
-  obtain ⟨k, env', n, hk⟩ := Reduce.termination env e hwf
-  exact ⟨env', n, ReduceK_to_ReduceStar hk⟩
+theorem Step.soundness (hwf : WF (env, e)) :
+    ∃ env' n, MultiStep (env, e) (env', .num n) := by
+  suffices h : ∀ c, Acc (fun c' c => Step c c') c -> WF c ->
+      ∃ env' n, MultiStep c (env', .num n) from
+    h _ (termination.apply _) hwf
+  intro c acc
+  induction acc with
+  | intro c _ ih =>
+    obtain ⟨env, e⟩ := c
+    intro hwf
+    cases progress hwf with
+    | inl hv =>
+      cases hv with
+      | num => exact ⟨_, _, .refl⟩
+    | inr hstep =>
+      obtain ⟨env', e', hstep⟩ := hstep
+      obtain ⟨env'', n, hmulti⟩ := ih _ hstep (preservation hwf hstep)
+      exact ⟨env'', n, .step hstep hmulti⟩
 
 -- Completeness
--- Every configuration that evaluates to an integer is well-formed
-
--- However, we cannot show completeness, as SmallStep VAE is not complete
+-- We cannot show completeness, as SmallStep VAE is not complete.
 -- Counterexample:
---   < ∅, { x := 1; x } + x > -> < [x -> 1], x + x > ->* < [x -> 1], 2 >
---   but < ∅, { x := 1; x } + x > is not WF
---   as fvs({ x := 1; x } + x) = {x} ∉ dom(∅) = ∅
+--   ⟨∅, {x := 1; x} + x⟩ -> ⟨[x -> 1], x + x⟩ ->* ⟨[x ↦ 1], 2⟩
+--   but ⟨∅, {x := 1; x} + x⟩ is not WF
+--   as fvs({x := 1; x} + x) = {x} ⊄ dom(∅) = ∅
 
 end VAE

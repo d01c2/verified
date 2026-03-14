@@ -1,3 +1,5 @@
+import Std
+
 namespace VAE
 
 inductive Expr where
@@ -7,10 +9,6 @@ inductive Expr where
   | val (x : String) (e1 : Expr) (e2 : Expr)
   | id (x : String)
 
-abbrev Env := String -> Option Int
-
--- helper: update the environment
-def Env.update (env : Env) (x : String) (v : Int) : Env :=
-  fun y => if y == x then some v else env y
+abbrev Env := Std.HashMap String Int
 
 end VAE

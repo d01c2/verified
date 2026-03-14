@@ -5,7 +5,7 @@ namespace IMP
 inductive Eval : Env -> Expr -> Value -> Prop where
   | num : Eval env (.num n) (.num n)
   | bool : Eval env (.bool b) (.bool b)
-  | var : env x = some v -> Eval env (.var x) v
+  | var (h : x ∈ env) : Eval env (.var x) (env.get x h)
   | add :
     Eval env e1 (.num n1) -> Eval env e2 (.num n2) ->
     Eval env (.add e1 e2) (.num (n1 + n2))
@@ -20,7 +20,7 @@ inductive Exec : Env -> Stmt -> Env -> Prop where
   | skip : Exec env .skip env
   | assign :
     Eval env e v ->
-    Exec env (.assign x e) (Env.update env x v)
+    Exec env (.assign x e) (env.insert x v)
   | seq :
     Exec env s1 env1 -> Exec env1 s2 env2 ->
     Exec env (.seq s1 s2) env2

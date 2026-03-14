@@ -1,3 +1,5 @@
+import Std
+
 namespace IMP
 
 inductive Expr where
@@ -19,10 +21,6 @@ inductive Value where
   | num (n : Int)
   | bool (b : Bool)
 
-abbrev Env := String -> Option Value
-
--- helper: update the environment
-def Env.update (env : Env) (x : String) (v : Value) : Env :=
-  fun y => if y == x then some v else env y
+abbrev Env := Std.HashMap String Value
 
 end IMP

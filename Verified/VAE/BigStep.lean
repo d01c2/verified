@@ -11,8 +11,9 @@ inductive Eval : Env -> Expr -> Int -> Prop where
     Eval env e1 n1 -> Eval env e2 n2 ->
     Eval env (.mul e1 e2) (n1 * n2)
   | val :
-    Eval env e1 n1 -> Eval (Env.update env x n1) e2 n2 ->
+    Eval env e1 n1 -> Eval (env.insert x n1) e2 n2 ->
     Eval env (.val x e1 e2) n2
-  | id : env x = some n -> Eval env (.id x) n
+  | id (h : x ∈ env) :
+    Eval env (.id x) (env.get x h)
 
 end VAE
