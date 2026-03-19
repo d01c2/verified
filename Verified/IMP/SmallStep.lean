@@ -3,12 +3,6 @@ import Verified.IMP.Syntax
 
 namespace IMP
 
-@[coe] def Value.toExpr : Value -> Expr
-  | .num n => .num n
-  | .bool b => .bool b
-
-instance : Coe Value Expr := ⟨Value.toExpr⟩
-
 inductive Expr.Step : Env × Expr -> Env × Expr -> Prop where
   | var (h : x ∈ env) :
     Expr.Step (env, .var x) (env, (env.get x h : Value))

@@ -8,3 +8,5 @@ import Verified.IMP.BigStep.Properties
 import Verified.VAE.SmallStep
 import Verified.VAE.SmallStep.Properties
 import Verified.IMP.SmallStep
+import Verified.VAE.Contextual
+import Verified.IMP.Contextual

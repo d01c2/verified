@@ -23,4 +23,10 @@ inductive Value where
 
 abbrev Env := Std.HashMap String Value
 
+@[coe] def Value.toExpr : Value -> Expr
+  | .num n => .num n
+  | .bool b => .bool b
+
+instance : Coe Value Expr := ⟨Value.toExpr⟩
+
 end IMP
